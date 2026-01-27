@@ -29,3 +29,21 @@ Place the script in your Autoware workspace root directory.
 cd ~/autoware
 chmod +x update_autoware.sh
 ./update_autoware.sh
+```
+## Important Notes
+
+> [!WARNING]
+> This script performs a **Clean Build** (`rm -rf build install log`). Depending on your system specifications, the build process may take a significant amount of time.
+
+## Disclaimer
+
+**Use this script at your own risk.**
+
+- This script is an unofficial utility and is not an official Autoware Foundation product.
+- The author is not responsible for any data loss, build failures, or damage to your development environment that may occur while using this script.
+- Since it performs a clean build, ensure you do not have any unsaved changes in your `build`, `install`, or `log` directories (though these are typically not for manual edits).
+- Always verify the script content before execution to ensure it fits your specific workspace configuration.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
