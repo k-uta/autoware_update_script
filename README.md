@@ -27,7 +27,7 @@ The script mirrors the [How to update a workspace][update-ws] workflow from the 
 | # | Step | Default command |
 |:-:|------|-----------------|
 | **1** | Update the Autoware root repository to the target branch | `git fetch && git merge --ff-only origin/<branch>` *(dirty tree auto-stashed)* |
-| **2** | *(opt-in)* Refresh build tools / CUDA / cuDNN / TensorRT | `./setup-dev-env.sh -y` |
+| **2** | *(opt-in)* Refresh build tools / CUDA / cuDNN / TensorRT via [Ansible][ansible] | `bash ansible/scripts/install-ansible.sh` → `ansible-galaxy collection install -f -r ansible-galaxy-requirements.yaml` → `ansible-playbook autoware.dev_env.install_dev_env` |
 | **3** | Upgrade system & ROS packages | `sudo apt-get update && sudo apt-get upgrade -y` |
 | **4** | Source the [ROS 2][ros2] environment (Humble / Jazzy auto-detected) | `source /opt/ros/$ROS_DISTRO/setup.bash` |
 | **5** | Sync `src/` repositories | `vcs import src < repositories/autoware.repos` + `vcs pull src` |
@@ -35,6 +35,9 @@ The script mirrors the [How to update a workspace][update-ws] workflow from the 
 | **7** | Build with [`colcon`][colcon] (ccache-aware, incremental by default) | `colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release` |
 
 Step 2 runs only when `SETUP_DEV_ENV=1`. Every other step runs on every invocation.
+
+> [!IMPORTANT]
+> **`setup-dev-env.sh` is deprecated** and scheduled for removal on **2026-05-24**. The official source-installation guide now invokes the Ansible playbook directly, so this script does the same when `SETUP_DEV_ENV=1`. See [autowarefoundation/autoware Discussion #7065][discussion-7065] for the full rationale and migration mapping.
 
 ### Two sync modes
 
@@ -104,7 +107,8 @@ Behavior is controlled entirely through environment variables — no flags, no c
 | `AUTOWARE_DIR` | `~/autoware` | Path to the Autoware root directory |
 | `AUTOWARE_BRANCH` | `main` | Branch or tag to track (e.g. `main`, `release/v1.0`) |
 | `FRESH_INSTALL` | `0` | `1` = delete `src/` and re-import all repositories. Also triggers the initial clone when `AUTOWARE_DIR` is absent, and implies `CLEAN_BUILD=1`. |
-| `SETUP_DEV_ENV` | `0` | `1` = run [`setup-dev-env.sh`][setup-dev-env] to refresh build tools, CUDA, cuDNN, TensorRT, etc. |
+| `SETUP_DEV_ENV` | `0` | `1` = install/refresh the dev environment via the Ansible playbook ([`install_dev_env`][install-dev-env]) — build tools, CUDA, cuDNN, TensorRT, etc. Replaces the deprecated `setup-dev-env.sh` ([Discussion #7065][discussion-7065]). |
+| `SKIP_NVIDIA` | `0` | `1` = pass `--skip-tags nvidia` to the dev-env playbook. Use on machines without an NVIDIA GPU. Only meaningful when `SETUP_DEV_ENV=1`. |
 | `INCLUDE_NIGHTLY` | `0` | `1` = also import [nightly repositories][nightly-repos]. ⚠️ May be unstable. |
 | `CLEAN_BUILD` | `0` | `1` = remove `build/`, `install/`, `log/` before building (full rebuild). |
 | `BUILD_JOBS` | `nproc / 2` | Parallel workers for `colcon build`. Lower this on low-memory machines. |
@@ -123,10 +127,16 @@ AUTOWARE_BRANCH=release/v1.0 bash ~/autoware_update_script/update_autoware.sh
 FRESH_INSTALL=1 bash ~/autoware_update_script/update_autoware.sh
 ```
 
-**Weekly deep update** — also refresh system-level dependencies (Ansible):
+**Weekly deep update** — also refresh system-level dependencies via Ansible:
 
 ```bash
 SETUP_DEV_ENV=1 bash ~/autoware_update_script/update_autoware.sh
+```
+
+**Same, but on a machine without an NVIDIA GPU:**
+
+```bash
+SETUP_DEV_ENV=1 SKIP_NVIDIA=1 bash ~/autoware_update_script/update_autoware.sh
 ```
 
 **Force a clean rebuild** without re-cloning `src/`:
@@ -153,7 +163,7 @@ AUTOWARE_DIR=/mnt/data/autoware BUILD_JOBS=4 \
 | Frequency | Command | What it covers |
 |-----------|---------|----------------|
 | Daily | `bash ~/autoware_update_script/update_autoware.sh` | Code + ROS package updates, incremental build |
-| Weekly | `SETUP_DEV_ENV=1 bash ~/autoware_update_script/update_autoware.sh` | Also refreshes Ansible-managed dependencies |
+| Weekly | `SETUP_DEV_ENV=1 bash ~/autoware_update_script/update_autoware.sh` | Also refreshes Ansible-managed dependencies via [`install_dev_env`][install-dev-env] |
 | On build failure after upstream change | `FRESH_INSTALL=1 bash ~/autoware_update_script/update_autoware.sh` | Wipes `src/` + `build/` and re-imports |
 
 ## Important notes
@@ -168,7 +178,7 @@ AUTOWARE_DIR=/mnt/data/autoware BUILD_JOBS=4 \
 > **Uncommitted changes in `src/`** trigger a confirmation prompt. On `FRESH_INSTALL=1` they will be deleted; in update mode they may conflict with `vcs pull`. **Uncommitted changes at the root** are auto-stashed (`git stash list` → `git stash pop` to recover).
 
 > [!WARNING]
-> Before installing NVIDIA libraries via `SETUP_DEV_ENV=1`, ensure you have reviewed and agreed to the licenses for [CUDA][cuda-eula], [cuDNN][cudnn-sla], and [TensorRT][tensorrt-sla].
+> Before installing NVIDIA libraries via `SETUP_DEV_ENV=1`, ensure you have reviewed and agreed to the licenses for [CUDA][cuda-eula], [cuDNN][cudnn-sla], and [TensorRT][tensorrt-sla]. On machines without an NVIDIA GPU, set `SKIP_NVIDIA=1` to skip these roles entirely.
 
 ## Troubleshooting
 
@@ -214,7 +224,9 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 [update-ws]: https://autowarefoundation.github.io/autoware-documentation/main/installation/autoware/source-installation/#how-to-update-a-workspace
 [troubleshoot]: https://autowarefoundation.github.io/autoware-documentation/main/community/support/troubleshooting/
 [qa]: https://github.com/autowarefoundation/autoware/discussions/categories/q-a
-[setup-dev-env]: https://github.com/autowarefoundation/autoware/blob/main/setup-dev-env.sh
+[install-dev-env]: https://github.com/autowarefoundation/autoware/blob/main/ansible/playbooks/install_dev_env.yaml
+[discussion-7065]: https://github.com/orgs/autowarefoundation/discussions/7065#discussion-9956560
+[ansible]: https://www.ansible.com/
 [nightly-repos]: https://github.com/autowarefoundation/autoware/blob/main/repositories/autoware-nightly.repos
 [ros2]: https://docs.ros.org/
 [humble]: https://docs.ros.org/en/humble/

@@ -17,7 +17,11 @@
 #   AUTOWARE_BRANCH  Branch or tag to track            (default: main)
 #   FRESH_INSTALL    1 = delete src/ and re-import     (default: 0)
 #                    Also handles the initial clone when AUTOWARE_DIR is absent.
-#   SETUP_DEV_ENV    1 = run setup-dev-env.sh          (default: 0)
+#   SETUP_DEV_ENV    1 = install dev env via Ansible   (default: 0)
+#                    (install-ansible.sh + install_dev_env playbook;
+#                     replaces the deprecated setup-dev-env.sh — see
+#                     https://github.com/orgs/autowarefoundation/discussions/7065)
+#   SKIP_NVIDIA      1 = pass --skip-tags nvidia       (default: 0)
 #   INCLUDE_NIGHTLY  1 = import nightly repos          (default: 0)
 #   CLEAN_BUILD      1 = remove build/install/log      (default: 0, forced on FRESH_INSTALL)
 #   BUILD_JOBS       parallel build jobs               (default: nproc/2)
@@ -41,6 +45,7 @@ AUTOWARE_DIR="${AUTOWARE_DIR:-$HOME/autoware}"
 AUTOWARE_BRANCH="${AUTOWARE_BRANCH:-main}"
 FRESH_INSTALL="${FRESH_INSTALL:-0}"
 SETUP_DEV_ENV="${SETUP_DEV_ENV:-0}"
+SKIP_NVIDIA="${SKIP_NVIDIA:-0}"
 INCLUDE_NIGHTLY="${INCLUDE_NIGHTLY:-0}"
 CLEAN_BUILD="${CLEAN_BUILD:-0}"
 BUILD_JOBS="${BUILD_JOBS:-$(( $(nproc) / 2 ))}"
@@ -80,7 +85,7 @@ echo -e "  Directory : $AUTOWARE_DIR"
 echo -e "  Branch    : $AUTOWARE_BRANCH  (at $CURRENT_REV)"
 echo -e "  Mode      : $UPDATE_MODE"
 echo -e "  Jobs      : $BUILD_JOBS"
-echo -e "  Options   : setup-dev-env=$SETUP_DEV_ENV  nightly=$INCLUDE_NIGHTLY  clean-build=$CLEAN_BUILD"
+echo -e "  Options   : setup-dev-env=$SETUP_DEV_ENV  skip-nvidia=$SKIP_NVIDIA  nightly=$INCLUDE_NIGHTLY  clean-build=$CLEAN_BUILD"
 echo ""
 
 # ─── Detect uncommitted work in src/ ───────────────────────────────────────
@@ -133,17 +138,32 @@ NEW_REV=$(git rev-parse --short HEAD)
 log_ok "Root: $CURRENT_REV → $NEW_REV  ($(elapsed $T))"
 
 ###############################################################################
-# Step (optional): setup-dev-env.sh
+# Step (optional): install dev environment via Ansible
+#
+# As of the deprecation of setup-dev-env.sh (planned removal 2026-05-24), the
+# official source-installation guide instructs users to invoke the Ansible
+# playbook directly. See:
+#   https://github.com/orgs/autowarefoundation/discussions/7065
 ###############################################################################
 if [ "$SETUP_DEV_ENV" = "1" ]; then
-    STEP=$((STEP+1)); log_step $STEP "Running setup-dev-env.sh"
+    STEP=$((STEP+1)); log_step $STEP "Installing dev environment via Ansible"
     T=$(date +%s)
-    if [ -f "./setup-dev-env.sh" ]; then
-        log_info "Ensure you have agreed to NVIDIA CUDA / cuDNN / TensorRT licenses."
-        ./setup-dev-env.sh -y
-        log_ok "setup-dev-env.sh complete  ($(elapsed $T))"
+    if [ -f "ansible/scripts/install-ansible.sh" ] \
+        && [ -f "ansible-galaxy-requirements.yaml" ]; then
+        if [ "$SKIP_NVIDIA" != "1" ]; then
+            log_info "Ensure you have agreed to NVIDIA CUDA / cuDNN / TensorRT licenses."
+        fi
+        bash ansible/scripts/install-ansible.sh
+        ansible-galaxy collection install -f -r ansible-galaxy-requirements.yaml
+        if [ "$SKIP_NVIDIA" = "1" ]; then
+            log_info "Skipping NVIDIA-tagged roles (--skip-tags nvidia)."
+            ansible-playbook autoware.dev_env.install_dev_env --skip-tags nvidia
+        else
+            ansible-playbook autoware.dev_env.install_dev_env
+        fi
+        log_ok "Dev env install complete  ($(elapsed $T))"
     else
-        log_warn "setup-dev-env.sh not found — skipping."
+        log_warn "ansible/scripts/install-ansible.sh or ansible-galaxy-requirements.yaml not found — skipping."
     fi
 fi
 
