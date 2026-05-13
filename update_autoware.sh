@@ -23,6 +23,8 @@
 #                     https://github.com/orgs/autowarefoundation/discussions/7065)
 #   SKIP_NVIDIA      1 = pass --skip-tags nvidia       (default: 0)
 #   INCLUDE_NIGHTLY  1 = import nightly repos          (default: 0)
+#   INCLUDE_EXTRA    1 = import extra-packages.repos   (default: 0)
+#                    (hardware-specific drivers; deps may need manual install)
 #   CLEAN_BUILD      1 = remove build/install/log      (default: 0, forced on FRESH_INSTALL)
 #   BUILD_JOBS       parallel build jobs               (default: nproc/2)
 ###############################################################################
@@ -47,6 +49,7 @@ FRESH_INSTALL="${FRESH_INSTALL:-0}"
 SETUP_DEV_ENV="${SETUP_DEV_ENV:-0}"
 SKIP_NVIDIA="${SKIP_NVIDIA:-0}"
 INCLUDE_NIGHTLY="${INCLUDE_NIGHTLY:-0}"
+INCLUDE_EXTRA="${INCLUDE_EXTRA:-0}"
 CLEAN_BUILD="${CLEAN_BUILD:-0}"
 BUILD_JOBS="${BUILD_JOBS:-$(( $(nproc) / 2 ))}"
 [ "$BUILD_JOBS" -lt 1 ] && BUILD_JOBS=1
@@ -85,7 +88,7 @@ echo -e "  Directory : $AUTOWARE_DIR"
 echo -e "  Branch    : $AUTOWARE_BRANCH  (at $CURRENT_REV)"
 echo -e "  Mode      : $UPDATE_MODE"
 echo -e "  Jobs      : $BUILD_JOBS"
-echo -e "  Options   : setup-dev-env=$SETUP_DEV_ENV  skip-nvidia=$SKIP_NVIDIA  nightly=$INCLUDE_NIGHTLY  clean-build=$CLEAN_BUILD"
+echo -e "  Options   : setup-dev-env=$SETUP_DEV_ENV  skip-nvidia=$SKIP_NVIDIA  nightly=$INCLUDE_NIGHTLY  extra=$INCLUDE_EXTRA  clean-build=$CLEAN_BUILD"
 echo ""
 
 # ─── Detect uncommitted work in src/ ───────────────────────────────────────
@@ -168,13 +171,36 @@ if [ "$SETUP_DEV_ENV" = "1" ]; then
 fi
 
 ###############################################################################
-# Step: System package upgrade
+# Step: Sync src/ repositories
+#
+# Matches the doc's "Update the repositories" step — runs before the ROS /
+# apt / rosdep block so dependency resolution sees freshly imported sources.
 ###############################################################################
-STEP=$((STEP+1)); log_step $STEP "Upgrading system packages"
+STEP=$((STEP+1)); log_step $STEP "Syncing src/ ($UPDATE_MODE)"
 T=$(date +%s)
-sudo apt-get update -qq
-sudo apt-get upgrade -y -qq
-log_ok "apt upgrade complete  ($(elapsed $T))"
+
+if [ "$FRESH_INSTALL" = "1" ] && [ -d "src" ]; then
+    rm -rf src
+fi
+mkdir -p src
+
+vcs import src < repositories/autoware.repos
+
+if [ "$INCLUDE_NIGHTLY" = "1" ] && [ -f "repositories/autoware-nightly.repos" ]; then
+    log_warn "Nightly repositories may be unstable."
+    vcs import src < repositories/autoware-nightly.repos
+fi
+
+if [ "$INCLUDE_EXTRA" = "1" ] && [ -f "repositories/extra-packages.repos" ]; then
+    log_warn "Extra packages may require manual dependency installation."
+    vcs import src < repositories/extra-packages.repos
+fi
+
+# vcs pull is unnecessary after a fresh import.
+[ "$FRESH_INSTALL" = "1" ] || vcs pull src
+
+REPO_COUNT=$(find src -maxdepth 3 -name ".git" -type d | wc -l)
+log_ok "$REPO_COUNT repositories synced  ($(elapsed $T))"
 
 ###############################################################################
 # Step: Source ROS 2
@@ -192,28 +218,13 @@ fi
 log_ok "ROS 2 $ROS_DISTRO sourced."
 
 ###############################################################################
-# Step: Sync src/ repositories
+# Step: System package upgrade
 ###############################################################################
-STEP=$((STEP+1)); log_step $STEP "Syncing src/ ($UPDATE_MODE)"
+STEP=$((STEP+1)); log_step $STEP "Upgrading system packages"
 T=$(date +%s)
-
-if [ "$FRESH_INSTALL" = "1" ] && [ -d "src" ]; then
-    rm -rf src
-fi
-mkdir -p src
-
-vcs import src < repositories/autoware.repos
-
-if [ "$INCLUDE_NIGHTLY" = "1" ] && [ -f "repositories/autoware-nightly.repos" ]; then
-    log_warn "Nightly repositories may be unstable."
-    vcs import src < repositories/autoware-nightly.repos
-fi
-
-# vcs pull is unnecessary after a fresh import.
-[ "$FRESH_INSTALL" = "1" ] || vcs pull src
-
-REPO_COUNT=$(find src -maxdepth 3 -name ".git" -type d | wc -l)
-log_ok "$REPO_COUNT repositories synced  ($(elapsed $T))"
+sudo apt-get update -qq
+sudo apt-get upgrade -y -qq
+log_ok "apt upgrade complete  ($(elapsed $T))"
 
 ###############################################################################
 # Step: Resolve ROS dependencies

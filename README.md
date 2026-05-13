@@ -28,11 +28,13 @@ The script mirrors the [How to update a workspace][update-ws] workflow from the 
 |:-:|------|-----------------|
 | **1** | Update the Autoware root repository to the target branch | `git fetch && git merge --ff-only origin/<branch>` *(dirty tree auto-stashed)* |
 | **2** | *(opt-in)* Refresh build tools / CUDA / cuDNN / TensorRT via [Ansible][ansible] | `bash ansible/scripts/install-ansible.sh` → `ansible-galaxy collection install -f -r ansible-galaxy-requirements.yaml` → `ansible-playbook autoware.dev_env.install_dev_env` |
-| **3** | Upgrade system & ROS packages | `sudo apt-get update && sudo apt-get upgrade -y` |
+| **3** | Sync `src/` repositories | `vcs import src < repositories/autoware.repos` + `vcs pull src` |
 | **4** | Source the [ROS 2][ros2] environment (Humble / Jazzy auto-detected) | `source /opt/ros/$ROS_DISTRO/setup.bash` |
-| **5** | Sync `src/` repositories | `vcs import src < repositories/autoware.repos` + `vcs pull src` |
+| **5** | Upgrade system & ROS packages | `sudo apt-get update && sudo apt-get upgrade -y` |
 | **6** | Resolve ROS dependencies | `rosdep update && rosdep install -y --from-paths src ...` |
 | **7** | Build with [`colcon`][colcon] (ccache-aware, incremental by default) | `colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release` |
+
+Step order mirrors the [official update workflow][update-ws] — repositories are synced **before** ROS sourcing, `apt upgrade`, and `rosdep`, so that dependency resolution sees the freshly imported sources.
 
 Step 2 runs only when `SETUP_DEV_ENV=1`. Every other step runs on every invocation.
 
@@ -110,6 +112,7 @@ Behavior is controlled entirely through environment variables — no flags, no c
 | `SETUP_DEV_ENV` | `0` | `1` = install/refresh the dev environment via the Ansible playbook ([`install_dev_env`][install-dev-env]) — build tools, CUDA, cuDNN, TensorRT, etc. Replaces the deprecated `setup-dev-env.sh` ([Discussion #7065][discussion-7065]). |
 | `SKIP_NVIDIA` | `0` | `1` = pass `--skip-tags nvidia` to the dev-env playbook. Use on machines without an NVIDIA GPU. Only meaningful when `SETUP_DEV_ENV=1`. |
 | `INCLUDE_NIGHTLY` | `0` | `1` = also import [nightly repositories][nightly-repos]. ⚠️ May be unstable. |
+| `INCLUDE_EXTRA` | `0` | `1` = also import [`extra-packages.repos`][extra-repos] (hardware-specific drivers). ⚠️ You may need to install their dependencies manually. |
 | `CLEAN_BUILD` | `0` | `1` = remove `build/`, `install/`, `log/` before building (full rebuild). |
 | `BUILD_JOBS` | `nproc / 2` | Parallel workers for `colcon build`. Lower this on low-memory machines. |
 
@@ -149,6 +152,12 @@ CLEAN_BUILD=1 bash ~/autoware_update_script/update_autoware.sh
 
 ```bash
 INCLUDE_NIGHTLY=1 bash ~/autoware_update_script/update_autoware.sh
+```
+
+**Include extra-packages.repos** (hardware-specific drivers — see the [official guide][src-install] for caveats):
+
+```bash
+INCLUDE_EXTRA=1 bash ~/autoware_update_script/update_autoware.sh
 ```
 
 **Custom workspace location & limited parallelism** (e.g. on a laptop):
@@ -228,6 +237,7 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 [discussion-7065]: https://github.com/orgs/autowarefoundation/discussions/7065#discussion-9956560
 [ansible]: https://www.ansible.com/
 [nightly-repos]: https://github.com/autowarefoundation/autoware/blob/main/repositories/autoware-nightly.repos
+[extra-repos]: https://github.com/autowarefoundation/autoware/blob/main/repositories/extra-packages.repos
 [ros2]: https://docs.ros.org/
 [humble]: https://docs.ros.org/en/humble/
 [jazzy]: https://docs.ros.org/en/jazzy/
